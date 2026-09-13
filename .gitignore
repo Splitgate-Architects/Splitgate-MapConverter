@@ -15,6 +15,24 @@ package-lock.json
 .backup/
 .vscode/
 
+# Input
+/Input/Maps/*
+/Input/Modes/*
+/Input/Prefabs/*
+!/Input/Maps/.gitkeep
+!/Input/Modes/.gitkeep
+!/Input/Prefabs/.gitkeep
+
+# Output
+/Output/Maps/*
+/Output/Modes/*
+/Output/Prefabs/*
+!/Output/Maps/.gitkeep
+!/Output/Modes/.gitkeep
+!/Output/Prefabs/.gitkeep
+
+
+
 # ╔══════════════════════════╗
 # ║ Windows                  ║
 # ╚══════════════════════════╝
