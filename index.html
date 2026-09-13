@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Splitgate Map Converter</title>
+    <meta name="description" content="Convert raw Splitgate folders into playable .bin formats or map packs.">
+    
+    <!-- JSZip Library für das Auslesen und Packen im Browser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #22c55e;
+            --border-color: #334155;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Zentrierung vor dem Drop, Sprung nach oben danach */
+        .container {
+            max-width: 1200px;
+            margin: auto auto;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            transition: margin 0.3s ease;
+        }
+        .container.has-content {
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+        header p {
+            color: var(--text-muted);
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .card-box {
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .dropzone {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            background: rgba(15, 23, 42, 0.3);
+        }
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.05);
+        }
+        .dropzone p {
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .dropzone b { color: var(--text-color); }
+
+        .batch-toolbar {
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--card-bg);
+            border: 1px solid var(--accent);
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .batch-toolbar.active { display: flex; }
+
+        .btn {
+            display: inline-block;
+            text-align: center;
+            background: var(--accent);
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            transition: background 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+        .btn:hover { background: var(--accent-hover); }
+        .btn:disabled { background: #475569; cursor: not-allowed; }
+
+        /* Grid und Karten-Design */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            border: 2px solid var(--border-color);
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+            position: relative;
+        }
+        .card:hover { transform: translateY(-3px); border-color: var(--text-muted); }
+        .card.selected {
+            border-color: var(--accent);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+            background: rgba(59, 130, 246, 0.03);
+        }
+
+        .card-select-indicator {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            width: 24px;
+            height: 24px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 2px solid var(--border-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: transparent;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .card.selected .card-select-indicator {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .card-img-wrapper {
+            position: relative;
+            width: 100%;
+            height: 160px;
+            background: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .card-img-wrapper img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .no-image {
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .card-content {
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            gap: 12px;
+        }
+
+        .badges { display: flex; gap: 6px; margin-bottom: 5px; }
+        .badge {
+            display: inline-block; font-size: 10px; padding: 3px 8px;
+            border-radius: 4px; font-weight: 600;
+        }
+        .badge-type { background: #334155; color: var(--text-muted); }
+
+        /* Eingabefelder direkt in der Karte */
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+        input[type="text"].card-input {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: #0f172a;
+            color: var(--text-color);
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        input[type="text"].card-input:focus {
+            outline: 2px solid var(--accent);
+            border-color: transparent;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container" id="main-container">
+    <header>
+        <h1>Splitgate Content Converter</h1>
+        <p>Convert raw Splitgate folders into playable .bin formats or map packs.</p>
+    </header>
+
+    <div class="card-box">
+        <div class="dropzone" id="dropzone">
+            <p>📁 Drag & drop your raw content folders here:<br>
+            <span style="display: inline-block; margin-top: 8px;">
+                <b>World.cf1047</b> &nbsp;|&nbsp; <b>Prefab.cf1047_prefab</b> &nbsp;|&nbsp; <b>payload.json</b>
+            </span></p>
+        </div>
+    </div>
+
+    <div class="batch-toolbar" id="batch-toolbar">
+        <span id="selection-count" style="font-size: 14px; font-weight: 600;">0 selected</span>
+        <button class="btn" id="export-btn" onclick="exportSelected()">📦 Compile & Download</button>
+    </div>
+
+    <div class="grid" id="grid"></div>
+</div>
+
+<script>
+    const dropzone = document.getElementById('dropzone');
+    const grid = document.getElementById('grid');
+    const batchToolbar = document.getElementById('batch-toolbar');
+    const mainContainer = document.getElementById('main-container');
+    
+    let projects = [];
+
+    // --- Drag & Drop Handling ---
+    ['dragenter', 'dragover'].forEach(e => dropzone.addEventListener(e, ev => {
+        ev.preventDefault(); dropzone.classList.add('dragover');
+    }));
+    ['dragleave', 'drop'].forEach(e => dropzone.addEventListener(e, ev => {
+        ev.preventDefault(); dropzone.classList.remove('dragover');
+    }));
+
+    dropzone.addEventListener('drop', async (e) => {
+        const items = e.dataTransfer.items;
+        if (!items) return;
+        
+        for (let i = 0; i < items.length; i++) {
+            const entry = items[i].webkitGetAsEntry();
+            if (entry && entry.isDirectory) {
+                await processDirectory(entry);
+            }
+        }
+        renderGrid();
+    });
+
+    // --- File Scanning Logic ---
+    async function processDirectory(dirEntry) {
+        const files = await readAllFiles(dirEntry);
+        let type = null;
+        let markerFile = null;
+        let imageFile = null;
+        let infoFile = null;
+        let readmeFile = null;
+
+        // Identify files
+        for (const file of files) {
+            const name = file.name.toLowerCase();
+            if (name === 'world.cf1047') { type = 'map'; markerFile = file; }
+            else if (name === 'prefab.cf1047_prefab') { type = 'prefab'; markerFile = file; }
+            else if (name === 'payload.json') { type = 'mode'; markerFile = file; }
+            else if (name.endsWith('.jpg') || name.endsWith('.png')) { imageFile = file; }
+            else if (name === 'info.json') { infoFile = file; }
+            else if (name === 'readme.md') { readmeFile = file; }
+        }
+
+        if (!type) return; // Not a valid raw folder
+
+        let nameStr = dirEntry.name;
+        let authorStr = "Unknown";
+
+        // Try extracting metadata
+        if (infoFile) {
+            try {
+                const text = await infoFile.text();
+                const json = JSON.parse(text.trim().replace(/^\uFEFF/, ''));
+                if (json.name) nameStr = json.name;
+                if (json.author) authorStr = json.author;
+            } catch(e) {}
+        } else if (readmeFile) {
+            const text = await readmeFile.text();
+            const lines = text.split('\n');
+            if (lines[0] && lines[0].startsWith('#')) nameStr = lines[0].replace(/#/g, '').trim();
+            if (lines[1] && lines[1].toLowerCase().includes('author:')) {
+                authorStr = lines[1].split(':')[1].trim();
+            }
+        }
+
+        // Preview URL generieren
+        let imageUrl = null;
+        if (imageFile) {
+            imageUrl = URL.createObjectURL(imageFile);
+        }
+
+        projects.push({
+            id: Date.now() + Math.random(),
+            folderName: dirEntry.name,
+            type: type,
+            markerFile: markerFile,
+            imageFile: imageFile,
+            imageUrl: imageUrl,
+            name: nameStr,
+            author: authorStr,
+            selected: true
+        });
+    }
+
+    async function readAllFiles(dirEntry) {
+        const dirReader = dirEntry.createReader();
+        let entries = [];
+        let readEntries = await new Promise(res => dirReader.readEntries(res));
+        while(readEntries.length > 0) {
+            entries.push(...readEntries);
+            readEntries = await new Promise(res => dirReader.readEntries(res));
+        }
+        
+        let files = [];
+        for (const entry of entries) {
+            if (entry.isFile) {
+                const file = await new Promise(res => entry.file(res));
+                files.push(file);
+            }
+        }
+        return files;
+    }
+
+    // --- UI Rendering ---
+    function renderGrid() {
+        grid.innerHTML = '';
+        
+        // Zentrierungs-Klasse toggeln je nach Inhalt
+        if (projects.length > 0) {
+            mainContainer.classList.add('has-content');
+        } else {
+            mainContainer.classList.remove('has-content');
+        }
+
+        const selectedCount = projects.filter(p => p.selected).length;
+        
+        if (selectedCount > 0) {
+            batchToolbar.classList.add('active');
+            
+            if (selectedCount === 1) {
+                document.getElementById('selection-count').textContent = `1 selected`;
+                document.getElementById('export-btn').textContent = `📦 Compile & Download (.bin)`;
+            } else {
+                document.getElementById('selection-count').textContent = `${selectedCount} selected`;
+                document.getElementById('export-btn').textContent = `📦 Compile & Download Pack`;
+            }
+        } else {
+            batchToolbar.classList.remove('active');
+        }
+
+        projects.forEach((proj, index) => {
+            const card = document.createElement('div');
+            card.className = `card ${proj.selected ? 'selected' : ''}`;
+            card.onclick = () => toggleSelect(index);
+            
+            // Image Wrapper Logic
+            let imgHtml = `<span class="no-image">${proj.type === 'mode' ? 'No Preview Required' : 'Missing Screenshot.jpg'}</span>`;
+            if (proj.imageUrl) {
+                imgHtml = `<img src="${proj.imageUrl}" alt="Preview">`;
+            }
+
+            card.innerHTML = `
+                <div class="card-select-indicator">✓</div>
+                <div class="card-img-wrapper">
+                    ${imgHtml}
+                </div>
+                <div class="card-content" onclick="event.stopPropagation();">
+                    <div class="badges">
+                        <span class="badge badge-type">Raw ${proj.type.toUpperCase()} / ${proj.folderName}</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Item Name</label>
+                        <input type="text" class="card-input" value="${escapeHtml(proj.name)}" oninput="updateProj(${index}, 'name', this.value)">
+                    </div>
+                    <div class="form-group">
+                        <label>Author</label>
+                        <input type="text" class="card-input" value="${escapeHtml(proj.author)}" oninput="updateProj(${index}, 'author', this.value)">
+                    </div>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    function toggleSelect(index) {
+        projects[index].selected = !projects[index].selected;
+        renderGrid();
+    }
+    
+    function updateProj(index, key, val) {
+        projects[index][key] = val;
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    // --- Strict Latin Helper ---
+    function convertToStrictLatin(text, allowDashes = false) {
+        if (!text) return "unknown";
+        let t = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        if (allowDashes) {
+            t = t.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-');
+            return t.replace(/^-+|-+$/g, '') || "unknown";
+        } else {
+            return t.replace(/[^a-z0-9]/g, '') || "unknown";
+        }
+    }
+
+    // --- Packaging Logic ---
+    async function buildBin(proj) {
+        const zip = new JSZip();
+        
+        // 1. Generate Info.json based on UI inputs
+        const infoObj = { name: proj.name, author: proj.author };
+        zip.file("Info.json", JSON.stringify(infoObj, null, 2));
+
+        // 2. Add Marker File (Auto-Minify Gamemode payloads to fix EOS limit)
+        if (proj.type === 'mode') {
+            const text = await proj.markerFile.text();
+            try {
+                // Parse and stringify without spaces to shrink size
+                const minified = JSON.stringify(JSON.parse(text));
+                zip.file(proj.markerFile.name, minified);
+            } catch(e) {
+                zip.file(proj.markerFile.name, proj.markerFile);
+            }
+        } else {
+            zip.file(proj.markerFile.name, proj.markerFile);
+        }
+
+        // 3. Add Image
+        if (proj.imageFile) {
+            zip.file("Screenshot.jpg", proj.imageFile);
+        }
+
+        // 4. Generate with specific comment for Splitgate
+        const content = await zip.generateAsync({ 
+            type: "blob",
+            compression: "DEFLATE",
+            compressionOptions: { level: 6 },
+            comment: "Packed by CreativeCore1047"
+        });
+
+        // Generate clean filename
+        const cleanOrigin = proj.folderName.toLowerCase().replace(/[^a-z0-9-]/g, '');
+        const cleanAuthor = convertToStrictLatin(proj.author, false);
+        const cleanName = convertToStrictLatin(proj.name, true);
+        const fileName = `${cleanOrigin}_${cleanAuthor}_${cleanName}.bin`;
+
+        return { name: fileName, blob: content };
+    }
+
+    async function exportSelected() {
+        const selected = projects.filter(p => p.selected);
+        if (selected.length === 0) return;
+
+        const btn = document.getElementById('export-btn');
+        const originalText = btn.textContent;
+        btn.textContent = "⏳ Compiling...";
+        btn.disabled = true;
+
+        if (selected.length === 1) {
+            // Download Single .bin
+            const result = await buildBin(selected[0]);
+            triggerDownload(result.blob, result.name);
+        } else {
+            // Bundle into .sgmaps / .sgprefabs / .sgmixed
+            const packZip = new JSZip();
+            let hasMaps = false, hasPrefabs = false;
+
+            for (const proj of selected) {
+                if (proj.type === 'map') hasMaps = true;
+                if (proj.type === 'prefab') hasPrefabs = true;
+                
+                const result = await buildBin(proj);
+                packZip.file(result.name, result.blob);
+            }
+
+            let ext = ".sgmaps";
+            if (hasMaps && hasPrefabs) ext = ".sgmixed";
+            else if (hasPrefabs) ext = ".sgprefabs";
+
+            const packContent = await packZip.generateAsync({ 
+                type: "blob", 
+                compression: "DEFLATE", 
+                compressionOptions: { level: 6 } 
+            });
+            triggerDownload(packContent, `Splitgate_ConvertedPack${ext}`);
+        }
+
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+
+    function triggerDownload(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+</script>
+</body>
+</html>
