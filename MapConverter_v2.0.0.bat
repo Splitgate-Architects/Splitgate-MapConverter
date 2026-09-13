@@ -18,7 +18,7 @@ $inputDir = Join-Path $baseDir "Input"
 $outputDir = Join-Path $baseDir "Output"
 $comment = "Packed by CreativeCore1047"
 
-# Definition der unterstützten Content-Typen und deren erforderliche Dateien
+# Definition der unterstützten Content-Typen (angepasst an neues Setup)
 $contentTypes = @(
     @{ id = "Maps";      marker = "World.cf1047";         hasImg = $true },
     @{ id = "Prefabs";   marker = "Prefab.cf1047_prefab"; hasImg = $true },
@@ -80,15 +80,15 @@ foreach ($type in $contentTypes) {
     foreach ($folder in $folders) {
         $subFolder = $folder.FullName
         $readme = Join-Path $subFolder "README.md"
-        $jsonPath = Join-Path $subFolder "info.json"
+        $jsonPath = Join-Path $subFolder "Info.json"
         $markerFile = Join-Path $subFolder $type.marker
         $imgFile = Join-Path $subFolder "Screenshot.jpg"
 
         $hasCustomInfo = Test-Path $jsonPath
+        $hasReadme = Test-Path $readme
 
-        # Validierung: info.json ODER README.md muss existieren
+        # Validierung: Nur der Format-Marker und ggf. das Bild sind zwingend
         $missing = @()
-        if (-not $hasCustomInfo -and -not (Test-Path $readme)) { $missing += "info.json (or README.md)" }
         if (-not (Test-Path $markerFile)) { $missing += $type.marker }
         if ($type.hasImg -and -not (Test-Path $imgFile)) { $missing += "Screenshot.jpg" }
 
@@ -103,38 +103,40 @@ foreach ($type in $contentTypes) {
 
         # Daten-Extraktion
         if ($hasCustomInfo) {
-            # Variante A: User hat eigene info.json bereitgestellt
             try {
                 $parsedJson = Get-Content $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
                 if ($parsedJson.name) { $itemName = $parsedJson.name }
                 if ($parsedJson.author) { $author = $parsedJson.author }
             } catch {
-                Write-Host "     [WARNING] Could not parse provided info.json. Proceeding with folder name." -ForegroundColor DarkYellow
+                Write-Host "     [WARNING] Could not parse Info.json. Proceeding with folder name." -ForegroundColor DarkYellow
             }
-        } else {
-            # Variante B: Fallback auf README.md Parsing
+        } elseif ($hasReadme) {
             $lines = @(Get-Content $readme -Encoding UTF8 | Where-Object { $_.Trim() -ne "" })
             if ($lines.Count -ge 2) {
                 if ($lines[0] -match "^#+\s*(.*)") { $itemName = $matches[1].Trim() }
                 if ($lines[1] -match "(?i)^#+\s*Author:\s*(.*)") { $author = $matches[1].Trim() }
             }
-            
-            # Temporäre info.json erstellen
-            $jsonObj = [ordered]@{
-                name = if ([string]::IsNullOrWhiteSpace($itemName)) { $folder.Name } else { $itemName }
-                author = if ([string]::IsNullOrWhiteSpace($author)) { "Unknown" } else { $author }
-            }
+        }
+
+        # Fallback auf Ordnernamen, falls keine Metadaten extrahiert wurden
+        if ([string]::IsNullOrWhiteSpace($itemName)) { $itemName = $folder.Name }
+        if ([string]::IsNullOrWhiteSpace($author)) { $author = "Unknown" }
+
+        # Temporäre Info.json erstellen (das Spielarchiv erfordert diese Datei)
+        if (-not $hasCustomInfo) {
+            $jsonObj = [ordered]@{ name = $itemName; author = $author }
             $jsonObj | ConvertTo-Json -Depth 2 | Set-Content $jsonPath -Encoding UTF8
         }
 
         # Dateinamen generieren
         $cleanOrigin = $folder.Name.ToLower() -replace '[^a-z0-9-]', ''
-        $cleanAuthor = ConvertTo-StrictLatin $author
-        $cleanItem = ConvertTo-StrictLatin $itemName -AllowDashes
-
-        if ([string]::IsNullOrEmpty($cleanAuthor) -and [string]::IsNullOrEmpty($cleanItem)) {
+        
+        if (-not $hasCustomInfo -and -not $hasReadme) {
+            # Clean Fallback: Keine Info-Dateien = Dateiname entspricht exakt dem bereinigten Ordnernamen
             $baseFileName = $cleanOrigin
         } else {
+            $cleanAuthor = ConvertTo-StrictLatin $author
+            $cleanItem = ConvertTo-StrictLatin $itemName -AllowDashes
             if ([string]::IsNullOrEmpty($cleanAuthor)) { $cleanAuthor = "unknown" }
             if ([string]::IsNullOrEmpty($cleanItem)) { $cleanItem = "unknown" }
             $baseFileName = "${cleanOrigin}_${cleanAuthor}_${cleanItem}"
@@ -146,6 +148,7 @@ foreach ($type in $contentTypes) {
         $binPath = Join-Path $currentOutDir $binFileName
         $targetImgPath = Join-Path $currentOutDir $imgFileName
 
+        # Massenverarbeitungs-Check
         if (Test-Path $binPath) {
             Write-Host "  -> [EXISTS] $($folder.Name) -> $binFileName already in output. Skipping." -ForegroundColor DarkGray
             $skippedTotal++
@@ -157,7 +160,7 @@ foreach ($type in $contentTypes) {
         $zipPath = Join-Path $baseDir "temp_$($folder.Name).zip"
         if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
-        $filesToPack = @("info.json", $type.marker)
+        $filesToPack = @("Info.json", $type.marker)
         if ($type.hasImg) { $filesToPack += "Screenshot.jpg" }
 
         Push-Location $subFolder
@@ -200,7 +203,7 @@ foreach ($type in $contentTypes) {
             $skippedTotal++
         }
 
-        # Aufräumen: Nur temporäre info.json löschen, eigene behalten
+        # Aufräumen: Nur temporäre Info.json löschen
         if (-not $hasCustomInfo -and (Test-Path $jsonPath)) { 
             Remove-Item $jsonPath -Force 
         }
